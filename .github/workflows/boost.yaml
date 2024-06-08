@@ -1,0 +1,136 @@
+---
+
+name: Boost
+
+on:
+  push:
+
+env:
+  curl_options: '-f -O -L --connect-timeout 15 -m 30 --retry 15 --retry-delay 10 --retry-max-time 300 --retry-all-errors'
+  sourceforge_mirror: 'downloads.sourceforge.net'
+  boost_version: '1.85.0'
+
+jobs:
+  test:
+    name: Boost
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+       arch: [ x86_64 ]
+       buildtype: [ release, debug ]
+    steps:
+
+      - name: Set buildtype
+        shell: bash
+        run: echo "buildtype=$(echo ${{matrix.buildtype}} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Set cmake and meson buildtype
+        shell: bash
+        run: |
+          echo "cmake_buildtype=$(echo ${{env.buildtype}} | sed 's/.*/\u&/')" >> $GITHUB_ENV
+          echo "meson_buildtype=${{env.buildtype}}" >> $GITHUB_ENV
+
+      - name: Set prefix path
+        shell: bash
+        run: |
+          echo "prefix_path_backslash=c:\strawberry_msvc_${{matrix.arch}}_${{env.buildtype}}" >> $GITHUB_ENV
+          echo "prefix_path_backslash2=c:\\\\strawberry_msvc_${{matrix.arch}}_${{env.buildtype}}" >> $GITHUB_ENV
+          echo "prefix_path_forwardslash=c:/strawberry_msvc_${{matrix.arch}}_${{env.buildtype}}" >> $GITHUB_ENV
+          echo "prefix_path_unix=/c/strawberry_msvc_${{matrix.arch}}_${{env.buildtype}}" >> $GITHUB_ENV
+
+      - name: Set lib postfix
+        if: env.buildtype == 'debug'
+        shell: bash
+        run: echo "lib_postfix=d" >> $GITHUB_ENV
+
+      - name: Set arch variables (x86_64)
+        shell: bash
+        run: |
+          echo "openssl_platform=VC-WIN64A" >> $GITHUB_ENV
+          echo "msbuild_platform=x64" >> $GITHUB_ENV
+          echo "arch_short=x64" >> $GITHUB_ENV
+          echo "arch_win=win64" >> $GITHUB_ENV
+          echo "libdir=lib64" >> $GITHUB_ENV
+          echo "bindir=bin64" >> $GITHUB_ENV
+
+      - name: Set extra version variables
+        shell: bash
+        run: |
+          echo "boost_version_underscore=$(echo ${{env.boost_version}} | sed 's/\./_/g')" >> $GITHUB_ENV
+
+      - name: Create directories
+        shell: bash
+        run: mkdir -p ${{env.prefix_path_unix}}/{bin,lib,include}
+
+      - name: Update PATH
+        shell: pwsh
+        run: echo "${{env.prefix_path_backslash}}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Copy bin files
+        shell: bash
+        run: cp /c/strawberry/c/bin/{patch.exe,strip.exe,strings.exe,objdump.exe} ${{env.prefix_path_unix}}/bin
+
+      - name: Move conflicting libraries
+        shell: bash
+        run: |
+          mv /c/msys64 /c/msys64_
+          mv /c/mingw32 /c/mingw32_
+          mv /c/mingw64 /c/mingw64_
+          mv /c/strawberry/c /c/strawberry/c_
+
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+
+      - name: Install python dependencies
+        shell: cmd
+        run: pip install meson ninja
+
+
+      - name: Setup MSVC Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86_64
+          sdk: 10.0.20348.0
+          vsversion: 2022
+          toolset: 14.40
+
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Create downloads directory
+        shell: cmd
+        run: mkdir downloads
+
+      - name: Create build directory
+        shell: cmd
+        run: mkdir build
+
+
+      - name: Download Boost
+        shell: bash
+        working-directory: downloads
+        run: curl ${{env.curl_options}} https://${{env.sourceforge_mirror}}/project/boost/boost/${{env.boost_version}}/boost_${{env.boost_version_underscore}}.tar.bz2
+
+      - name: Extract Boost
+        shell: bash
+        working-directory: build
+        run: tar -xf  ../downloads/boost_${{env.boost_version_underscore}}.tar.bz2
+
+      - name: Configure Boost
+        shell: cmd
+        env:
+          CL: "/MP"
+        working-directory: build/boost_${{env.boost_version_underscore}}
+        run: bootstrap.bat
+
+      - name: Build and install Boost
+        shell: cmd
+        env:
+          CL: "/MP"
+        working-directory: build/boost_${{env.boost_version_underscore}}
+        run: b2.exe -a -q -j 4 -d1 --ignore-site-config --stagedir="stage" --layout="tagged" --without-mpi --without-python --prefix="${{env.prefix_path_forwardslash}}" --exec-prefix="${{env.prefix_path_forwardslash}}\bin" --libdir="${{env.prefix_path_forwardslash}}\lib" --includedir="${{env.prefix_path_forwardslash}}\include" toolset=msvc architecture=x86 link=shared runtime-link=shared threadapi=win32 threading=multi variant=${{env.buildtype}} install
+ 
